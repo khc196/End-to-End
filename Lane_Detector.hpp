@@ -15,7 +15,7 @@
 #include <string.h>
 #include <sys/time.h>
 #include "inverseMapping.hpp"
-#include <deque>
+#include "dbscan.h"
 using namespace cv;
 using namespace std;
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))  
@@ -40,7 +40,22 @@ string to_string(int n) {
 	s << n;
 	return s.str();
 }
-
+void printResults(vector<cPoint>& points, int num_points)
+{
+    int i = 0;
+    printf("Number of points: %u\n"
+        " x     y     z     cluster_id\n"
+        "-----------------------------\n"
+        , num_points);
+    while (i < num_points)
+    {
+          printf("%5d %5d %5d: %d\n",
+                 points[i].x,
+                 points[i].y, points[i].z,
+                 points[i].clusterID);
+          ++i;
+    }
+}
 
 class Lane_Detector {
 protected:
@@ -73,7 +88,8 @@ protected:
 	float get_slope(const Point& p1, const Point& p2);
 	int position(const Point P1, const Point P2);
 	int argmax(int* arr, int size);
-	vector<double> polyfit(int size, vector<int> vec_x, vector<int> vec_y, int degree);
+	vector<double> polyfit(int size, vector<cPoint> vec_p, int degree);
+	vector<int> filter_line(vector<int> vec_nonzero);
 public:
 	Point p1, p2, p3, p4;
 	Mat originImg_left;
@@ -170,30 +186,76 @@ void Lane_Detector::operate(Mat originImg) {
 	//imshow("closed_r", dilated_r);
 	int histogram_l[100] = {0};
 	int histogram_r[100] = {0};
-	vector<int> nonzero_l_x, nonzero_l_y, nonzero_r_x, nonzero_r_y; 
+	vector<int> nonzero_l_x, nonzero_l_y, nonzero_r_x, nonzero_r_y;
+	vector<cPoint> nonzero_l_p, nonzero_r_p; 
 	for(int i = 0; i < 140; i++) {
 		for(int j = 0; j < 100; j++){
 			if(dilated_l.data[i * dilated_l.step + j] != 0){
 				nonzero_l_y.push_back(i);
 				nonzero_l_x.push_back(j);
+				cPoint temp = cPoint(j, i, 0);
+				nonzero_l_p.push_back(temp);
 			}
 			if(dilated_r.data[i * dilated_l.step + j] != 0){
 				nonzero_r_y.push_back(i);
 				nonzero_r_x.push_back(j);
+				cPoint temp = cPoint(j, i, 0);
+				nonzero_r_p.push_back(temp);
 			}
 		}
 	}
-	printf("=============left===============\n");
-	vector<double> poly_left = polyfit(nonzero_l_x.size(), nonzero_l_x, nonzero_l_y, 1);
+	DBSCAN ds(10, 2500.0, nonzero_l_p);
+	DBSCAN ds2(10, 2500.0, nonzero_r_p);
+	ds.run();
+	ds2.run();
+	vector<cPoint> nonzero_l_p_f, nonzero_r_p_f;
+	int i = 0;
+	while (i < ds.getTotalPointSize())
+    {
+        if(ds.m_points[i].clusterID == 1){
+			nonzero_l_p_f.push_back(nonzero_l_p[i]);
+		}
+		i++;
+    }
+	int j = 0;
+	while (j < ds2.getTotalPointSize())
+    {
+        if(ds2.m_points[j].clusterID == 1){
+			nonzero_r_p_f.push_back(nonzero_r_p[j]);
+		}
+		j++;
+    }
+	// printf("=============left===============\n");
+	// vector<double> poly_left = polyfit(nonzero_l_p_f.size(), nonzero_l_p_f, 3);
 	// printf("============right===============\n");
 	// vector<double> poly_right = polyfit(nonzero_r_x.size(), nonzero_r_x, nonzero_r_y, 1);
-
-	for(int i = 0; i < 100; i++){
-		double y = (poly_left[0] * pow(i, 0) + poly_left[1] * pow(i,1));
-		printf("%f ",y);
-		circle(dilated_l, Point(i, y), 5, Scalar(255,255,255));
+	Mat left_lane(140, 100, CV_8UC3);
+	Mat right_lane(140, 100, CV_8UC3);
+	left_lane = Scalar(0, 0, 0);
+	right_lane = Scalar(0, 0, 0);
+	vector<Point> points, points2;
+	for(int i = 0; i < nonzero_l_p_f.size(); i++){
+		points.push_back(Point(nonzero_l_p_f[i].x, nonzero_l_p_f[i].y));
 	}
-	printf("\n");
+	for(int i = 0; i < nonzero_r_p_f.size(); i++){
+		points2.push_back(Point(nonzero_r_p_f[i].x+100, nonzero_r_p_f[i].y));
+	}
+	// for(int i = 0; i < 100; i++){
+	// 	double y = 0;
+	// 	for(int j = 0; j <= 3; j++){
+	// 		y += poly_left[j] * pow(i, j);
+	// 	}
+	// }
+	Mat curve(points, true);
+	Mat curve2(points2, true);
+	//polylines(left_lane, curve, true, Scalar(255, 255, 0), 15);
+	cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
+	Mat forcurve = imremapped.clone();
+	
+	polylines(forcurve, curve, true, Scalar(255, 255, 0), 15);
+	polylines(forcurve, curve2, true, Scalar(0, 255, 255), 15);
+
+	addWeighted(forcurve, 0.3, imremapped, 0.7, 0.0, imremapped);
 	// int min_num_pixel = 1;
 	// for(int i = 0; i < 140; i++){
 	// 	for(int j = 0; j < 100; j++) {
@@ -264,8 +326,11 @@ void Lane_Detector::operate(Mat originImg) {
 	// 	}
  	// }
 	Mat result;
-	hconcat(dilated_l, dilated_r, result);
-	imshow("Result", result);
+	//hconcat(dilated_l, dilated_r, result);
+	
+	//imshow("left result", left_lane);
+	//imshow("left", dilated_l);
+	// imshow("Result", result);
 	// int i = 200;
 	// int j = 180;
 	// while (j >= 0){3
@@ -296,17 +361,20 @@ void Lane_Detector::operate(Mat originImg) {
 	// p4.x += 100;
 	// line(imremapped, p1, p2, COLOR_RED, 4, CV_AA);
 	// line(imremapped, p3, p4, COLOR_RED, 4, CV_AA);
-	// //imshow("originImg", imremapped);
+	imshow("originImg", imremapped);
 	waitKey(0);
 }
-vector<double> Lane_Detector::polyfit(int size, vector<int> vec_x, vector<int> vec_y, int degree){
+vector<int> Lane_Detector::filter_line(vector<int> vec_nonzero){
+
+}
+vector<double> Lane_Detector::polyfit(int size, vector<cPoint> vec_p, int degree){
 	int n = degree;
 	double X[2*n+1];
-	
+	printf("%d\n", size);
 	for(int i = 0; i<2*n+1; i++){
 		X[i]=0;
 		for(int j = 0; j<size; j++){
-			X[i]=X[i]+pow(vec_x[j]/10, i);
+			X[i]=X[i]+pow(vec_p[j].x, i);
 		}
 	}
 	double B[n+1][n+2], a[n+1];
@@ -319,7 +387,7 @@ vector<double> Lane_Detector::polyfit(int size, vector<int> vec_x, vector<int> v
 	for(int i = 0; i<n+1; i++){
 		Y[i] = 0;
 		for(int j = 0; j < size; j++){
-			Y[i]=Y[i]+pow(vec_x[j]/10, i)*vec_y[j]/10;
+			Y[i]=Y[i]+pow(vec_p[j].x, i)*vec_p[j].y;
 		}
 	}
 	for (int i = 0; i<=n; i++){
@@ -346,13 +414,13 @@ vector<double> Lane_Detector::polyfit(int size, vector<int> vec_x, vector<int> v
 		}
 	} 
 	for(int i = n-1; i >= 0; i--){
-		a[i]=B[i][n];
+		a[i] = B[i][n];
 		for(int j = 0; j<n; j++){
 			if(j != i){
 				a[i] = a[i] - B[i][j] * a[j];
 			}
 		}
-		a[i]=a[i]/B[i][i];
+		a[i] = a[i] / B[i][i];
 	}
 	for(int i = n-1; i >= 0; i--){
 		printf("%fx^%d", a[i], i);
