@@ -59,7 +59,6 @@ void printResults(vector<cPoint>& points, int num_points)
 
 class Lane_Detector {
 protected:
-
 	float left_slope;
 	float right_slope;
 	float left_length;
@@ -78,7 +77,9 @@ protected:
     int vanishing_point_x;
     int vanishing_point_y;
     int* ipm_table;
-    
+	
+	double prev_slope_l, prev_slope_r;
+
 	void base_ROI(Mat& img, Mat& img_ROI);
 	void v_roi(Mat& img, Mat& img_ROI, const Point& p1, const Point& p2);
 	void region_of_interest_L(Mat& img, Mat& img_ROI);
@@ -156,7 +157,8 @@ void Lane_Detector::init() {
 	right_length = 0;
 	left_error_count = 0;
 	right_error_count = 0;
-
+	prev_slope_l = 0;
+	prev_slope_r = 0;
 	vanishing_point_x = 320;
 	vanishing_point_y = 235;
 	ipm_table = new int[DST_REMAPPED_WIDTH * DST_REMAPPED_HEIGHT];
@@ -218,12 +220,22 @@ void Lane_Detector::operate(Mat originImg) {
 	//cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
 	forcurve = imremapped.clone();
 	int degree_l = 1, degree_r = 1;
-	if(points_l.size() == 4)
-		degree_l = 3;
-	if(points_r.size() == 4)
-		degree_r = 3;
 	poly_left = polyfit(points_l.size(), points_l, degree_l);
 	poly_right = polyfit(points_r.size(), points_r, degree_r);
+	if(abs(poly_left[1]) < 0.04f) poly_left[1] = 0.f;
+	if(abs(poly_right[1]) < 0.04f) poly_right[1] = 0.f;
+	if(isnan(poly_left[1]) || isnan(poly_right[1]) || poly_left[1] * poly_right[1] < -0.1) {
+		if(isnan(poly_left[1]) || prev_slope_l * poly_left[1] <= 0) {
+			poly_left[1] = poly_right[1];
+			poly_left[0] = poly_right[0] - 50*sqrt(1+pow(poly_right[1],2));
+		}
+		else if(isnan(poly_right[1]) || prev_slope_r * poly_right[1] <= 0){
+			poly_right[1] = poly_left[1];
+			poly_right[0] = poly_left[0] + 30*sqrt(1+pow(poly_left[1],2));
+		}
+	}
+	prev_slope_l = poly_left[1];
+	prev_slope_r = poly_right[1];
 	for(int i = 0; i < 120; i++){
 		int x = 0;
 		for(int j = 0; j <= degree_l; j++)
@@ -238,306 +250,8 @@ void Lane_Detector::operate(Mat originImg) {
 		if(x >= 0)
 		circle(forcurve, Point(x+70, i), 3, Scalar(0, 255, 255), -1);
 	}
+
 	addWeighted(forcurve, 0.3, imremapped, 0.7, 0.0, imremapped);
-	// vector<int> nonzero_l_x, nonzero_l_y, nonzero_r_x, nonzero_r_y;
-	// vector<Point> nonzero_l_p, nonzero_r_p; 
-	// for(int i = 0; i < 120; i++) {
-	// 	for(int j = 0; j < 70; j++){
-	// 		histogram_l[j] += dilated_l.data[i * dilated_l.step + j];
-	//  		histogram_r[j] += dilated_r.data[i * dilated_r.step + j];
-	// 		if(dilated_l.data[i * dilated_l.step + j] != 0){
-	// 			nonzero_l_y.push_back(i);
-	// 			nonzero_l_x.push_back(j);
-	// 			Point temp = Point(j, i);
-	// 			nonzero_l_p.push_back(temp);
-	// 		}
-	// 		if(dilated_r.data[i * dilated_l.step + j] != 0){
-	// 			nonzero_r_y.push_back(i);
-	// 			nonzero_r_x.push_back(j);
-	// 			Point temp = Point(j, i);
-	// 			nonzero_r_p.push_back(temp);
-	// 		}
-	// 	}
-	// }
-	// //imshow("dilated_r", dilated_r);
-	// int current_left_x = argmax(histogram_l, 70);
-	// int current_right_x = argmax(histogram_r, 70);
-	// int window_height = 10;
-	// int minpixel = 3;
-	// Mat forcurve;
-	// cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
-	// forcurve = imremapped.clone();
-	// vector<Point> vec_left, vec_right;
-	// int noneCount_l = 0, noneCount_r = 0;
-	// for(int i = 0; i < 14; i++) {
-	// 	int win_y_high = 0 + window_height * (i+1);
-	// 	int win_y_low = 0 + window_height * (i);
-	// 	int center_y = (win_y_high + win_y_low) / 2;
-	// 	int nonzero_l_sum = 0, nonzero_r_sum = 0, nonzero_l_size = 0, nonzero_r_size = 0;
-	// 	for(int j = 0; j < nonzero_l_x.size(); j++){
-	// 		if(nonzero_l_y[j] < win_y_high && nonzero_l_y[j] >= win_y_low){
-	// 			nonzero_l_sum += nonzero_l_x[j];
-	// 			nonzero_l_size++;
-	// 			nonzero_l_x.erase(nonzero_l_x.begin() + j);
-	// 			noneCount_l = 0;
-	// 		}
-	// 		else{
-	// 			noneCount_l++;
-	// 		}
-	// 	}
-	// 	for(int j = 0; j < nonzero_r_x.size(); j++){
-	// 		if(nonzero_r_y[j] < win_y_high && nonzero_r_y[j] >= win_y_low){
-	// 			nonzero_r_sum += nonzero_r_x[j];
-	// 			nonzero_r_size++;
-	// 			nonzero_r_x.erase(nonzero_r_x.begin() + j);
-	// 		}
-	// 	}
-	// 	if(nonzero_l_size >= minpixel){
-	// 		int nonzero_l_avg = nonzero_l_sum / nonzero_l_size;
-	// 		if(nonzero_l_avg < current_left_x+15 && nonzero_l_avg > current_left_x-40) {
-	// 			current_left_x = nonzero_l_avg;
-	// 			noneCount_l = 0;
-	// 		}
-	// 		else{
-	// 			noneCount_l++;
-	// 		}
-	// 	}
-	// 	if(nonzero_r_size >= minpixel){
-	// 		int nonzero_r_avg = nonzero_r_sum / nonzero_r_size;
-	// 		if(nonzero_r_avg < current_right_x+40 && nonzero_r_avg > current_right_x-15) {
-	// 			current_right_x = nonzero_r_avg;
-	// 			noneCount_r = 0;
-	// 		}
-	// 		else {
-	// 			noneCount_r++;
-	// 		}
-	// 	}
-	// 	//rectangle(forcurve, Point(current_left_x-10, win_y_low), Point(current_left_x+10, win_y_high), Scalar(255,0, 0), 2);
-	// 	//rectangle(forcurve, Point(current_right_x+60, win_y_low), Point(current_right_x+80, win_y_high), Scalar(255, 0, 0), 2);
-	// 	vec_left.push_back(Point(current_left_x, center_y));
-	// 	vec_right.push_back(Point(current_right_x+70, center_y));
-	// }
-	// int degree = 1;
-	// Mat curve, curve2;
-	// curve = Mat(vec_left, true);
-	// curve2 = Mat(vec_right, true);
-	// if(nonzero_l_p.size() > 60)
-	// 	polylines(forcurve, curve, true, Scalar(255, 255, 0), 15);
-	// if(nonzero_r_p.size() > 60)
-	// 	polylines(forcurve, curve2, true, Scalar(0, 255, 255), 15);
-	// addWeighted(forcurve, 0.3, imremapped, 0.7, 0.0, imremapped);
-	// DBSCAN ds(10, 2800.0, nonzero_l_p);
-	// DBSCAN ds2(10, 2800.0, nonzero_r_p);
-	// DBSCAN ds(4, 1.0, nonzero_l_p);
-	// DBSCAN ds2(4, 1.0, nonzero_r_p);
-	// ds.run();
-	// ds2.run();
-	// vector<cPoint> nonzero_l_p_f, nonzero_r_p_f;
-	// int countIDs[100] = { 0, };
-	// int countIDs2[100] = { 0, };
-	// int i = 1;
-	// while (i < ds.getTotalPointSize())
-    // {
-	// 	countIDs[ds.m_points[i].clusterID]++;
-	// 	i++;
-    // }
-	// int j = 1;
-	// while (j < ds2.getTotalPointSize())
-    // {
-    //     countIDs2[ds2.m_points[j].clusterID]++;
-	// 	j++;
-    // }
-	// i = 1;
-	// i = 1;
-	// while(countIDs[i] > 0){
-	// 	countIDs[i] += 3 * avgX[i];
-	// 	i++;
-	// }
-	// i = 1;
-	// while(countIDs2[i] > 0){
-	// 	countIDs2[i] -= 3 * avgX2[i];
-	// 	i++;
-	// }
-	// i = 1;
-	// int maxCount = 0, maxID = 0;
-	// while(countIDs[i] > 0){
-	// 	if(maxCount < countIDs[i]){
-	// 		maxCount = countIDs[i];
-	// 		maxID = i;
-	// 	}
-	// 	i++;
-	// }
-	// i = 1;
-	// int maxCount2 = 0, maxID2 = 0;
-	// while(countIDs2[i] > 0){
-	// 	if(maxCount2 < countIDs2[i]){
-	// 		maxCount2 = countIDs2[i];
-	// 		maxID2 = i;
-	// 	}
-	// 	i++;
-	// }
-	// i = 0;
-	// while(i < ds.getTotalPointSize()){
-	// 	// if(ds.m_points[i].clusterID == maxID)
-	// 	if(ds.m_points[i].clusterID > 0)
-	// 		nonzero_l_p_f.push_back(ds.m_points[i]);
-	// 	i++;
-	// } 
-	// i = 0;
-	// while(i < ds2.getTotalPointSize()){
-	// 	// if(ds2.m_points[i].clusterID == maxID2)
-	// 	if(ds2.m_points[i].clusterID > 0)
-	// 		nonzero_r_p_f.push_back(ds2.m_points[i]);
-	// 	i++;
-	// }
-	// // printf("=============left===============\n");
-	// //vector<double> poly_left = polyfit(nonzero_l_p_f.size(), nonzero_l_p_f, 1);
-	// // printf("============right===============\n");
-	// //vector<double> poly_right = polyfit(nonzero_r_p_f.size(), nonzero_r_p_f, 1);
-	// Mat left_lane(140, 100, CV_8UC3);
-	// Mat right_lane(140, 100, CV_8UC3);
-	// left_lane = Scalar(0, 0, 0);
-	// right_lane = Scalar(0, 0, 0);
-	// vector<Point> points, points2;
-	// cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
-	// Mat forcurve = imremapped.clone();
-	// for(int i = 0; i < nonzero_l_p_f.size(); i++){
-	// 	//points.push_back(Point(nonzero_l_p_f[i].x, nonzero_l_p_f[i].y));
-	// 	//int x = nonzero_l_p_f[i].x;
-	// 	//int y = poly_left[0] * pow(x, 0) + poly_left[1] * pow(x, 1);// + poly_left[2] * pow(x, 2) + poly_left[3] * pow(x, 3);
-	// 	//points.push_back(Point(x, int(y)));
-	// 	//circle(forcurve, Point(x, int(y)), 3, Scalar(255, 255, 0), -1);
-	// 	circle(forcurve, Point(nonzero_l_p_f[i].x, nonzero_l_p_f[i].y), 3, Scalar(255, 255, 0), -1);
-	// }
-	// for(int i = 0; i < nonzero_r_p_f.size(); i++){
-	// 	//points2.push_back(Point(nonzero_r_p_f[i].x+100, nonzero_r_p_f[i].y));
-	// 	// int x = nonzero_r_p_f[i].x;
-	// 	// int y = poly_right[0] * pow(x, 0) + poly_right[1] * pow(x, 1);// + poly_right[2] * pow(x, 2) + poly_right[3] * pow(x, 3);
-	// 	// points2.push_back(Point(x+100, int(y)));
-	// 	// circle(forcurve, Point(x+100, int(y)), 3, Scalar(0, 255, 255), -1);
-	// 	circle(forcurve, Point(nonzero_r_p_f[i].x+100, nonzero_r_p_f[i].y), 3, Scalar(0, 255, 255), -1);
-	// }
-	// // for(int i = 0; i < 100; i++){
-	// // 	double y = 0;
-	// // 	for(int j = 0; j <= 3; j++){
-	// // 		y += poly_left[j] * pow(i, j);
-	// // 	}
-	// // }
-	// // Mat curve(points, true);
-	// // Mat curve2(points2, true);
-	// // //polylines(left_lane, curve, true, Scalar(255, 255, 0), 15);
-	// // 
-	
-	
-	// // polylines(forcurve, curve, true, Scalar(255, 255, 0), 15);
-	// // polylines(forcurve, curve2, true, Scalar(0, 255, 255), 15);
-
-	// addWeighted(forcurve, 0.3, imremapped, 0.7, 0.0, imremapped);
-	// int min_num_pixel = 1;
-	// for(int i = 0; i < 140; i++){
-	// 	for(int j = 0; j < 100; j++) {
-	// 		histogram_l[j] += dilated_l.data[i * dilated_l.step + j];
-	// 		histogram_r[j] += dilated_r.data[i * dilated_r.step + j];
-	// 		if(dilated_l.data[i * dilated_l.step + j] != 0){
-	// 			nonzero_l_y.push_back(i);
-	// 			nonzero_l_x.push_back(j);
-	// 		}
-	// 		if(dilated_r.data[i * dilated_l.step + j] != 0){
-	// 			nonzero_r_y.push_back(i);
-	// 			nonzero_r_x.push_back(j);
-	// 		}
-	// 	}
-	// }
-	// int current_left_x = argmax(histogram_l, 100);
-	// int current_right_x = argmax(histogram_r, 100);
-	// int window_height = 20;
-	// for(int i = 0; i < 7; i++) {
-	// 	int win_y_low = 140 - window_height * (i+1);
-	// 	int win_y_high = 140 - window_height * (i);
-	// 	int win_leftx_min = current_left_x - 15;
-	// 	int win_leftx_max = current_left_x + 15;
-	// 	int win_rightx_min = current_right_x - 15;
-	// 	int win_rightx_max = current_right_x + 15;
-	// 	if(win_leftx_max > 100){
-	// 		win_leftx_min = 70;
-	// 		win_leftx_max = 100;
-	// 	}
-	// 	if(win_rightx_max > 100){
-	// 		win_rightx_min = 70;
-	// 		win_rightx_max = 100;
-	// 	}
-	// 	rectangle(dilated_l, Point(win_leftx_min, win_y_low), Point(win_leftx_max, win_y_high), Scalar(255,255,255), 2);
-	// 	rectangle(dilated_r, Point(win_rightx_min, win_y_low), Point(win_rightx_max, win_y_high), Scalar(255,255,255), 2);
-	// 	vector<int> left_window_x_inds;
-	// 	vector<int> left_window_y_inds;
-	// 	vector<int> right_window_x_inds;
-	// 	vector<int> right_window_y_inds;
-	// 	for(int l = 0; l < nonzero_l_x.size(); l++){
-	// 		if(nonzero_l_x.at(l) > win_leftx_min && nonzero_l_x.at(l) < win_leftx_max 
-	// 		&& nonzero_l_y.at(l) > win_y_low && nonzero_l_y.at(l) < win_y_high){
-	// 			left_window_x_inds.push_back(nonzero_l_x.at(l));
-	// 			left_window_y_inds.push_back(nonzero_l_y.at(l));
-	// 		}
-	// 	}
-	// 	for(int l = 0; l < nonzero_r_x.size(); l++){
-	// 		if(nonzero_r_x.at(l) > win_rightx_min && nonzero_r_x.at(l) < win_rightx_max 
-	// 		&& nonzero_r_y.at(l) > win_y_low && nonzero_r_y.at(l) < win_y_high){
-	// 			right_window_x_inds.push_back(nonzero_r_x.at(l));
-	// 			right_window_y_inds.push_back(nonzero_r_y.at(l));
-	// 		}
-	// 	}
-	// 	printf("%d : %d\n", i, left_window_x_inds.size());
-	// 	if(left_window_x_inds.size() >= min_num_pixel){
-	// 		current_left_x = 0;
-	// 		for(int l = 0; l < nonzero_l_x.size(); l++){
-	// 			current_left_x += nonzero_l_x.at(l);
-	// 		}
-	// 		current_left_x /= nonzero_l_x.size();
-	// 	}
-	// 	if(right_window_x_inds.size() >= min_num_pixel){
-	// 		current_right_x = 0;
-	// 		for(int l = 0; l < nonzero_r_x.size(); l++){
-	// 			current_right_x += nonzero_r_x.at(l);
-	// 		}
-	// 		current_right_x /= nonzero_r_x.size();
-	// 	}
- 	// }
-	
-	//hconcat(dilated_l, dilated_r, result);
-	
-	//imshow("left result", left_lane);
-	//imshow("left", dilated_l);
-	// imshow("Result", result);
-	// int i = 200;
-	// int j = 180;
-	// while (j >= 0){
-	// 	int histogram[200];
-	// 	for(int i = 0; i < 200; i++) {
-	// 		for(int j = 0; j < 140; j++) {
-	// 			histogram[i] += cannyImg.at(i, j);
-	// 		}
-	// 	}
-	// 	int left_peak = argmax(histogram, 100);
-	// 	int right_peak = argmax(histogram + 4 * 100, 100)
-	// 	i -= 20;
-	// 	j -= 20;
-	// }
-	
-	// int midpoint = 100;
-	// int startleftX, startrightX, current_leftX, current_rightX;
-	// int num_windows = 7;
-	// int window_height = 20;
-	// startleftX = argmax(histogram, 100);
-	// startrightX = argmax(histogram + 4 * 100, 100);
-	// current_leftX = startleftX;
-	// current_rightX = startrightX;
-
-	// hough_left(roi_l, &p1, &p2);
-	// hough_right(roi_r, &p3, &p4);
-	// p3.x += 100;
-	// p4.x += 100;
-	// line(imremapped, p1, p2, COLOR_RED, 4, CV_AA);
-	// line(imremapped, p3, p4, COLOR_RED, 4, CV_AA);
 	resize(originImg, originImg, Size(160, 120), 0, 0, CV_INTER_NN);
 	cvtColor(originImg, originImg, CV_BGR2BGRA);
 	Mat result, result2;
