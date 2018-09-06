@@ -77,11 +77,13 @@ protected:
     int vanishing_point_x;
     int vanishing_point_y;
     int* ipm_table;
-	
+	VideoWriter outputVideo;
+
 	double prev_slope_l, prev_slope_r;
 	double prev_intercept_l, prev_intercept_r;
 	Point prev_p_l, prev_p_r;
-
+	bool isinit = true;
+	int error_count_l, error_count_r;
 	void base_ROI(Mat& img, Mat& img_ROI);
 	void v_roi(Mat& img, Mat& img_ROI, const Point& p1, const Point& p2);
 	void region_of_interest_L(Mat& img, Mat& img_ROI);
@@ -144,12 +146,12 @@ float Lane_Detector::get_right_slope() {
 }
 
 void Lane_Detector::init() {
-	string path = "/home/foscar/ISCC_Videos/";
+	string path = "output.avi";
 	struct tm* datetime;
 	time_t t;
 	t = time(NULL);
 	datetime = localtime(&t);
-	string s_t = path.append(to_string(datetime->tm_year + 1900)).append("-").append(to_string(datetime->tm_mon + 1)).append("-").append(to_string(datetime->tm_mday)).append("_").append(to_string(datetime->tm_hour)).append(":").append(to_string(datetime->tm_min)).append(":").append(to_string(datetime->tm_sec)).append(".avi");
+	string s_t = path;
 
 	mask = getStructuringElement(MORPH_RECT, Size(3, 3), Point(1, 1));
 
@@ -163,8 +165,14 @@ void Lane_Detector::init() {
 	prev_slope_r = 0;
 	prev_p_l = Point(0, 0);
 	prev_p_r = Point(0, 0);
+	error_count_l = 0;
+	error_count_r = 0;
 	vanishing_point_x = 320;
 	vanishing_point_y = 235;
+	
+	
+	//outputVideo.open(s_t, VideoWriter::fourcc('X', 'V', 'I', 'D'), 10, Size(720, 120), true);
+	outputVideo.open(s_t, VideoWriter::fourcc('D', 'I', 'V', 'X'), 10, Size(720, 120), true);
 	ipm_table = new int[DST_REMAPPED_WIDTH * DST_REMAPPED_HEIGHT];
     build_ipm_table(SRC_RESIZED_WIDTH, SRC_RESIZED_HEIGHT, 
                     DST_REMAPPED_WIDTH, DST_REMAPPED_HEIGHT, 
@@ -182,23 +190,6 @@ void Lane_Detector::operate(Mat originImg) {
 	morphologyEx(cannyImg, dilatedImg, MORPH_CLOSE, Mat(9,9, CV_8U, Scalar(1)));
 	Mat roi_l = dilatedImg.clone();
 	Mat roi_r = dilatedImg.clone();
-	// int b_l = prev_p_l.x - prev_slope_l * 1.5 * prev_p_l.y;
-	// int b_r = prev_p_r.x - prev_slope_r * 1.5 * prev_p_r.y;
-	// if (abs(prev_slope_l) > 0.2 && abs(prev_slope_r) > 0.2){
-	// 	printf("adaptive roi...\n");
-	// 	for (int i = 0; i < 120; i++){
-	// 		int x_l = prev_slope_l * i + b_l + 20;
-	// 		int x_r = prev_slope_r * i + b_r - 20;
-	// 		if(x_l < 0) x_l = 0;
-	// 		if(x_r > 140) x_r = 140;
-	// 		for(int j = x_l; j < 140; j++){
-	// 			roi_l.data[i * roi_l.step + j] = 0;
-	// 		}
-	// 		for(int j = 0; j < x_r; j++){
-	// 			roi_r.data[i * roi_r.step + j] = 0;
-	// 		}
-	// 	}
-	// }
 	
 	BASE_ROI:
 	printf("base roi...\n");
@@ -239,38 +230,20 @@ void Lane_Detector::operate(Mat originImg) {
 		
 		if(max_arg_l[i] != -1){
 			//circle(imremapped, Point(max_arg_l[i], i * 30 + 15), 3, Scalar(255, 255, 0), -1);
-			points_l.push_back(Point(i * 30 + 15, max_arg_l[i]));
+			double d = abs(max_arg_l[i] - prev_slope_l * (i * 30 + 15) - prev_intercept_l)/sqrt(1+pow(prev_slope_l, 2));
+			printf("left point distance : %f\n", d);
+			if(isinit || d < 25 || error_count_l < 5)
+				points_l.push_back(Point(i * 30 + 15, max_arg_l[i]));
 		}
 		if(max_arg_r[i] != -1){
 			//circle(imremapped, Point(max_arg_r[i]+70, i * 30 + 15), 3, Scalar(0, 255, 255), -1);
-			points_r.push_back(Point(i * 30 + 15, max_arg_r[i]));
+			double d = abs(max_arg_r[i] - prev_slope_r * (i * 30 + 15) - prev_intercept_r)/sqrt(1+pow(prev_slope_r, 2));
+			printf("right point distance : %f\n", d);
+			if(isinit || d < 25 || error_count_r < 5)
+				points_r.push_back(Point(i * 30 + 15, max_arg_r[i]));
 		}
 	}	
-	if(points_l.size() >= 3){
-		if (prev_slope_l < 0){
-			if(points_l[0].x * 1.2 < points_l[1].x && points_l[2].x < points_l[0].x) {
-				printf("left - erase bottom point\n");
-				points_l.erase(points_l.begin() + 2);
-			}
-			if(points_l[2].x > points_l[1].x * 1.2 && points_l[0].x > points_l[2].x) {
-				printf("left - erase top point\n");
-				points_l.erase(points_l.begin());
-			}
-		} 
-	}
-	if(points_r.size() >= 3){
-		if (prev_slope_r < 0){
-			printf("%d %d %d \n", points_r[0].x,points_r[1].x, points_r[2].x);
-			if(points_r[0].x * 1.2 < points_r[1].x && points_r[2].x < points_r[0].x) {
-				printf("right - erase bottom point\n");
-				points_r.erase(points_r.begin() + 2);
-			}
-			if(points_r[2].x > points_r[1].x * 1.2 && points_r[0].x > points_r[2].x) {
-				printf("right - erase top point\n");
-				points_r.erase(points_r.begin());
-			}
-		} 
-	}
+	
 	
 	Mat forcurve;
 	//cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
@@ -283,13 +256,27 @@ void Lane_Detector::operate(Mat originImg) {
 	printf("right: ");
 	poly_right = polyfit(points_r.size(), points_r, degree_r);
 	
+	if(isnan(poly_left[1])){
+		error_count_l++;
+	}
+	else{
+		error_count_l = 0;
+	}
+	if(isnan(poly_right[1])){
+		error_count_r++;
+	}
+	else{
+		error_count_r = 0;
+	}
+	printf("error count left : %d\n", error_count_l);
+	printf("error count right : %d\n", error_count_r);
 	if(abs(poly_left[1]) < 0.04f) {
 		poly_left[1] = 0.f;
 		if(abs(poly_right[1]) > 0.04f && abs(poly_right[1]) < 0.1f){
 			poly_right[1] = 0.f;
 		}
 	}
-	else if(abs(prev_slope_l - poly_left[1]) > 0.5 && points_l.size() < 4){
+	else if(abs(prev_slope_l - poly_left[1]) > 0.5){
 		// poly_left[1] = poly_right[1];
 		// poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
 		// printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
@@ -303,7 +290,7 @@ void Lane_Detector::operate(Mat originImg) {
 			poly_left[1] = 0.f;
 		}
 	}
-	else if(abs(prev_slope_r - poly_right[1]) > 0.5 && points_r.size() < 3){
+	else if(abs(prev_slope_r - poly_right[1]) > 0.5){
 		// poly_right[1] = poly_left[1];
 		// poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
 		// printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
@@ -318,7 +305,6 @@ void Lane_Detector::operate(Mat originImg) {
 			poly_left[0] = prev_intercept_l;
 			poly_right[1] = prev_slope_r;
 			poly_right[0] = prev_intercept_r;
-			goto BASE_ROI;
 		}
 		else if(isnan(poly_left[1]) || prev_slope_l * poly_left[1] < 0.0f) {
 			poly_left[1] = poly_right[1];
@@ -382,7 +368,15 @@ void Lane_Detector::operate(Mat originImg) {
 	hconcat(originImg, result2, result2);
 	//imshow("Img", imremapped);
 	imshow("Img", result2);
-	waitKey(0);
+	if(isinit){
+		isinit = false;
+	}
+	cvtColor(result2, result2, CV_BGRA2BGR);
+	outputVideo << result2;
+	if(waitKey(10)==0){
+		return;
+	}
+	
 }
 vector<double> Lane_Detector::polyfit(int size, vector<Point> vec_p, int degree){
 	int n = degree;

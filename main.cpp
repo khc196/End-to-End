@@ -31,6 +31,10 @@ int main(int argc, char* argv)
             {
                 continue;
             }
+            if(strcmp(dir_entry->d_name, "Alpine2"))
+            {
+                continue;
+            }
             DIR            *l_dir_info;
             struct dirent  *l_dir_entry;
             char buffer_1[64];
