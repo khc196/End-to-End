@@ -79,6 +79,8 @@ protected:
     int* ipm_table;
 	
 	double prev_slope_l, prev_slope_r;
+	double prev_intercept_l, prev_intercept_r;
+	Point prev_p_l, prev_p_r;
 
 	void base_ROI(Mat& img, Mat& img_ROI);
 	void v_roi(Mat& img, Mat& img_ROI, const Point& p1, const Point& p2);
@@ -159,6 +161,8 @@ void Lane_Detector::init() {
 	right_error_count = 0;
 	prev_slope_l = 0;
 	prev_slope_r = 0;
+	prev_p_l = Point(0, 0);
+	prev_p_r = Point(0, 0);
 	vanishing_point_x = 320;
 	vanishing_point_y = 235;
 	ipm_table = new int[DST_REMAPPED_WIDTH * DST_REMAPPED_HEIGHT];
@@ -166,7 +170,6 @@ void Lane_Detector::init() {
                     DST_REMAPPED_WIDTH, DST_REMAPPED_HEIGHT, 
                     vanishing_point_x, vanishing_point_y, ipm_table);
 }
-
 void Lane_Detector::operate(Mat originImg) {
 	Mat imgray;
     Mat imremapped = Mat(DST_REMAPPED_HEIGHT, DST_REMAPPED_WIDTH, CV_8UC1);
@@ -175,22 +178,49 @@ void Lane_Detector::operate(Mat originImg) {
     inverse_perspective_mapping(DST_REMAPPED_WIDTH, DST_REMAPPED_HEIGHT, imgray.data, ipm_table, imremapped.data);
 	imremapped = imremapped(Rect(30, 0, 140, 120));
 	Canny(imremapped, cannyImg, 70, 210);
-	int kernel_data[] = {2, -1, -1, -1, 2, -1, -1, -1, 2};
-	Mat roi_l = cannyImg(Rect(0, 0, 70, 120));
-	Mat roi_r = cannyImg(Rect(70, 0, 70, 120));
-	Mat dilated_l, dilated_r;
+	Mat dilatedImg;
+	morphologyEx(cannyImg, dilatedImg, MORPH_CLOSE, Mat(9,9, CV_8U, Scalar(1)));
+	Mat roi_l = dilatedImg.clone();
+	Mat roi_r = dilatedImg.clone();
+	// int b_l = prev_p_l.x - prev_slope_l * 1.5 * prev_p_l.y;
+	// int b_r = prev_p_r.x - prev_slope_r * 1.5 * prev_p_r.y;
+	// if (abs(prev_slope_l) > 0.2 && abs(prev_slope_r) > 0.2){
+	// 	printf("adaptive roi...\n");
+	// 	for (int i = 0; i < 120; i++){
+	// 		int x_l = prev_slope_l * i + b_l + 20;
+	// 		int x_r = prev_slope_r * i + b_r - 20;
+	// 		if(x_l < 0) x_l = 0;
+	// 		if(x_r > 140) x_r = 140;
+	// 		for(int j = x_l; j < 140; j++){
+	// 			roi_l.data[i * roi_l.step + j] = 0;
+	// 		}
+	// 		for(int j = 0; j < x_r; j++){
+	// 			roi_r.data[i * roi_r.step + j] = 0;
+	// 		}
+	// 	}
+	// }
 	
-	morphologyEx(roi_l, dilated_l, MORPH_CLOSE, Mat(9,9, CV_8U, Scalar(1)));
-	morphologyEx(roi_r, dilated_r, MORPH_CLOSE, Mat(9,9, CV_8U, Scalar(1)));
+	BASE_ROI:
+	printf("base roi...\n");
+	for(int i = 0; i < 120; i++){
+		for(int j = 70; j < 140; j++){
+			roi_l.data[i * roi_l.step + j] = 0;
+		}
+		for(int j = 0; j < 70; j++){
+			roi_r.data[i * roi_r.step + j] = 0;
+		}
+	}
+	
+	
 	// imshow("closed_l", dilated_l);
 	// imshow("closed_r", dilated_r);
-	int histogram_l[4][70] = {0};
-	int histogram_r[4][70] = {0};
+	int histogram_l[4][140] = {0};
+	int histogram_r[4][140] = {0};
 	for(int i = 0; i < 4; i++){
 		for(int j = 0; j < 30; j++){
-			for(int k = 0; k < 70; k++){
-				histogram_l[i][k] += dilated_l.data[(i * 30 + j) * dilated_l.step + k];
-				histogram_r[i][k] += dilated_r.data[(i * 30 + j) * dilated_r.step + k];
+			for(int k = 0; k < 140; k++){
+				histogram_l[i][k] += roi_l.data[(i * 30 + j) * roi_l.step + k];
+				histogram_r[i][k] += roi_r.data[(i * 30 + j) * roi_r.step + k];
 			}
 		}
 	}
@@ -204,8 +234,8 @@ void Lane_Detector::operate(Mat originImg) {
 		for(int j = 1; j <= 22; j+=2){
 			line(imremapped, Point(7*(j), i*30 + 30), Point(7*(j+1), i*30 + 30), COLOR_RED, 1, CV_AA);
 		}
-		max_arg_l[i] = argmax(histogram_l[i], 70);
-		max_arg_r[i] = argmax(histogram_r[i], 70);
+		max_arg_l[i] = argmax(histogram_l[i], 140);
+		max_arg_r[i] = argmax(histogram_r[i], 140);
 		
 		if(max_arg_l[i] != -1){
 			//circle(imremapped, Point(max_arg_l[i], i * 30 + 15), 3, Scalar(255, 255, 0), -1);
@@ -216,61 +246,147 @@ void Lane_Detector::operate(Mat originImg) {
 			points_r.push_back(Point(i * 30 + 15, max_arg_r[i]));
 		}
 	}	
+	if(points_l.size() >= 3){
+		if (prev_slope_l < 0){
+			if(points_l[0].x * 1.2 < points_l[1].x && points_l[2].x < points_l[0].x) {
+				printf("left - erase bottom point\n");
+				points_l.erase(points_l.begin() + 2);
+			}
+			if(points_l[2].x > points_l[1].x * 1.2 && points_l[0].x > points_l[2].x) {
+				printf("left - erase top point\n");
+				points_l.erase(points_l.begin());
+			}
+		} 
+	}
+	if(points_r.size() >= 3){
+		if (prev_slope_r < 0){
+			printf("%d %d %d \n", points_r[0].x,points_r[1].x, points_r[2].x);
+			if(points_r[0].x * 1.2 < points_r[1].x && points_r[2].x < points_r[0].x) {
+				printf("right - erase bottom point\n");
+				points_r.erase(points_r.begin() + 2);
+			}
+			if(points_r[2].x > points_r[1].x * 1.2 && points_r[0].x > points_r[2].x) {
+				printf("right - erase top point\n");
+				points_r.erase(points_r.begin());
+			}
+		} 
+	}
+	
 	Mat forcurve;
 	//cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
 	forcurve = imremapped.clone();
 	int degree_l = 1, degree_r = 1;
+	printf("prev left: %fx: \n",prev_slope_l);
+	printf("prev right: %fx: \n",prev_slope_r);
+	printf("left: ");
 	poly_left = polyfit(points_l.size(), points_l, degree_l);
+	printf("right: ");
 	poly_right = polyfit(points_r.size(), points_r, degree_r);
-	if(abs(poly_left[1]) < 0.04f) poly_left[1] = 0.f;
-	if(abs(poly_right[1]) < 0.04f) poly_right[1] = 0.f;
-	if(isnan(poly_left[1]) || isnan(poly_right[1]) || poly_left[1] * poly_right[1] < -0.1) {
-		if(isnan(poly_left[1]) || prev_slope_l * poly_left[1] <= 0) {
-			poly_left[1] = poly_right[1];
-			poly_left[0] = poly_right[0] - 50*sqrt(1+pow(poly_right[1],2));
-		}
-		else if(isnan(poly_right[1]) || prev_slope_r * poly_right[1] <= 0){
-			poly_right[1] = poly_left[1];
-			poly_right[0] = poly_left[0] + 30*sqrt(1+pow(poly_left[1],2));
+	
+	if(abs(poly_left[1]) < 0.04f) {
+		poly_left[1] = 0.f;
+		if(abs(poly_right[1]) > 0.04f && abs(poly_right[1]) < 0.1f){
+			poly_right[1] = 0.f;
 		}
 	}
-	prev_slope_l = poly_left[1];
-	prev_slope_r = poly_right[1];
+	else if(abs(prev_slope_l - poly_left[1]) > 0.5 && points_l.size() < 4){
+		// poly_left[1] = poly_right[1];
+		// poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
+		// printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
+		poly_left[1] = prev_slope_l;
+		poly_left[0] = prev_intercept_l;
+		printf("new left: %fx\n", poly_left[1]);
+	}
+	if(abs(poly_right[1]) < 0.04f) {
+		poly_right[1] = 0.f;
+		if(abs(poly_left[1]) > 0.04 && abs(poly_left[1]) < 0.1f){
+			poly_left[1] = 0.f;
+		}
+	}
+	else if(abs(prev_slope_r - poly_right[1]) > 0.5 && points_r.size() < 3){
+		// poly_right[1] = poly_left[1];
+		// poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
+		// printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+		poly_right[1] = prev_slope_r;
+		poly_right[0] = prev_intercept_r;
+		printf("new right: %fx\n", poly_right[1]);
+	}
+	
+	if(isnan(poly_left[1]) || isnan(poly_right[1]) ||  prev_slope_l * poly_left[1] < 0 || poly_left[1] * poly_right[1] < -0.1) {
+		if(isnan(poly_left[1]) && isnan(poly_right[1])){
+			poly_left[1] = prev_slope_l;
+			poly_left[0] = prev_intercept_l;
+			poly_right[1] = prev_slope_r;
+			poly_right[0] = prev_intercept_r;
+			goto BASE_ROI;
+		}
+		else if(isnan(poly_left[1]) || prev_slope_l * poly_left[1] < 0.0f) {
+			poly_left[1] = poly_right[1];
+			poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
+			printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
+		}
+		else if(isnan(poly_right[1]) || prev_slope_r * poly_right[1] < 0.f){
+			poly_right[1] = poly_left[1];
+			poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
+			printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+		}
+	}
+	double distance = (poly_right[0] - poly_left[0]) / sqrt(1 + pow(poly_left[1], 2));
+	printf("distance : %f\n", distance);
+	if (abs(distance) < 50) {
+		if((distance < 50 && distance > 0)) {
+			poly_left[1] = poly_right[1];
+			poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
+			printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
+		}
+		else if((distance < 0 && distance > -50)){
+			poly_right[1] = poly_left[1];
+			poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
+			printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+		}
+	}
 	for(int i = 0; i < 120; i++){
 		int x = 0;
 		for(int j = 0; j <= degree_l; j++)
 			x += poly_left[j] * pow(i, j);
-		if(x >= 0)
-		circle(forcurve, Point(x, i), 3, Scalar(255, 255, 0), -1);
+		if(x >= 0){
+			circle(forcurve, Point(x+2, i), 3, Scalar(255, 255, 0), -1);
+			prev_p_l = Point(x, i);
+		}
 	}
 	for(int i = 0; i < 120; i++){
 		int x = 0;
 		for(int j = 0; j <= degree_r; j++)
 			x += poly_right[j] * pow(i, j);
-		if(x >= 0)
-		circle(forcurve, Point(x+70, i), 3, Scalar(0, 255, 255), -1);
+		if(x >= 0){
+			circle(forcurve, Point(x+2, i), 3, Scalar(0, 255, 255), -1);
+			prev_p_r = Point(x, i);
+		}
 	}
+	prev_slope_l = poly_left[1];
+	prev_intercept_l = poly_left[0];
+	prev_slope_r = poly_right[1];
+	prev_intercept_r = poly_right[0];
 
 	addWeighted(forcurve, 0.3, imremapped, 0.7, 0.0, imremapped);
 	resize(originImg, originImg, Size(160, 120), 0, 0, CV_INTER_NN);
 	cvtColor(originImg, originImg, CV_BGR2BGRA);
 	Mat result, result2;
-	hconcat(cannyImg, dilated_l, dilated_l);
-	hconcat(dilated_l, dilated_r, result);
-	cvtColor(result, result, CV_GRAY2BGRA);
+	cvtColor(cannyImg, cannyImg, CV_GRAY2BGRA);
+	cvtColor(roi_l, roi_l, CV_GRAY2BGRA);
+	cvtColor(roi_r, roi_r, CV_GRAY2BGRA);
+	hconcat(cannyImg, roi_l, roi_l);
+	hconcat(roi_l, roi_r, result);
+	 //cvtColor(result, result, CV_GRAY2BGRA);
 	hconcat(result, imremapped, result2);
 	hconcat(originImg, result2, result2);
 	//imshow("Img", imremapped);
 	imshow("Img", result2);
 	waitKey(0);
 }
-vector<int> Lane_Detector::filter_line(vector<int> vec_nonzero){
-
-}
 vector<double> Lane_Detector::polyfit(int size, vector<Point> vec_p, int degree){
 	int n = degree;
 	double X[2*n+1];
-	printf("%d\n", size);
 	for(int i = 0; i<2*n+1; i++){
 		X[i]=0;
 		for(int j = 0; j<size; j++){
