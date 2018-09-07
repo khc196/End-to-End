@@ -15,7 +15,6 @@
 #include <string.h>
 #include <sys/time.h>
 #include "inverseMapping.hpp"
-#include "dbscan.h"
 using namespace cv;
 using namespace std;
 #define MIN(X,Y) ((X) < (Y) ? (X) : (Y))  
@@ -39,22 +38,6 @@ string to_string(int n) {
 	stringstream s;
 	s << n;
 	return s.str();
-}
-void printResults(vector<cPoint>& points, int num_points)
-{
-    int i = 0;
-    printf("Number of points: %u\n"
-        " x     y     z     cluster_id\n"
-        "-----------------------------\n"
-        , num_points);
-    while (i < num_points)
-    {
-          printf("%5d %5d %5d: %d\n",
-                 points[i].x,
-                 points[i].y, points[i].z,
-                 points[i].clusterID);
-          ++i;
-    }
 }
 
 class Lane_Detector {
@@ -222,9 +205,9 @@ void Lane_Detector::operate(Mat originImg) {
 	vector<Point> points_l, points_r;
 	vector<double> poly_left, poly_right;
 	for(int i = 0; i < 4; i++){
-		for(int j = 1; j <= 22; j+=2){
-			line(imremapped, Point(7*(j), i*30 + 30), Point(7*(j+1), i*30 + 30), COLOR_RED, 1, CV_AA);
-		}
+		// for(int j = 1; j <= 22; j+=2){
+		// 	line(imremapped, Point(7*(j), i*30 + 30), Point(7*(j+1), i*30 + 30), COLOR_RED, 1, CV_AA);
+		// }
 		max_arg_l[i] = argmax(histogram_l[i], 140);
 		max_arg_r[i] = argmax(histogram_r[i], 140);
 		
@@ -319,16 +302,26 @@ void Lane_Detector::operate(Mat originImg) {
 	}
 	double distance = (poly_right[0] - poly_left[0]) / sqrt(1 + pow(poly_left[1], 2));
 	printf("distance : %f\n", distance);
-	if (abs(distance) < 50) {
-		if((distance < 50 && distance > 0)) {
+	if (abs(distance) < 90) {
+		if((distance < 90 && distance > 0)) {
 			poly_left[1] = poly_right[1];
 			poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
 			printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
 		}
-		else if((distance < 0 && distance > -50)){
+		else if((distance < 0 && distance > -90)){
 			poly_right[1] = poly_left[1];
 			poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
 			printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+		}
+	}
+	if (abs(poly_right[1]-poly_left[1]) > 0.1){
+		double diff_left = abs(poly_left[1] - prev_slope_l);
+		double diff_right = abs(poly_right[1] - prev_slope_r);
+		if(diff_left > diff_right){
+			poly_left[1] = poly_right[1];
+		}
+		else {
+			poly_right[1] = poly_left[1];
 		}
 	}
 	for(int i = 0; i < 120; i++){
@@ -372,7 +365,7 @@ void Lane_Detector::operate(Mat originImg) {
 		isinit = false;
 	}
 	cvtColor(result2, result2, CV_BGRA2BGR);
-	outputVideo << result2;
+	//outputVideo << result2;
 	if(waitKey(10)==0){
 		return;
 	}
