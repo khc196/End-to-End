@@ -42,6 +42,7 @@ string to_string(int n) {
 
 class Lane_Detector {
 protected:
+	Point p1, p2, p3, p4;
 	float left_slope;
 	float right_slope;
 	float left_length;
@@ -76,12 +77,12 @@ protected:
 	float get_slope(const Point& p1, const Point& p2);
 	int position(const Point P1, const Point P2);
 	int argmax(int* arr, int size);
+	int argmax_r(int* arr, int size);
 	vector<double> polyfit(int size, vector<Point> vec_p, int degree);
 	vector<int> filter_line(vector<int> vec_nonzero);
+	vector<double> left_lane;
+	vector<double> right_lane;
 public:
-	Point p1, p2, p3, p4;
-	Mat originImg_left;
-	Mat originImg_right;
 	Lane_Detector() {}
 	void init();
 	void operate(Mat originImg);
@@ -93,6 +94,8 @@ public:
 	bool is_right_error();
 	bool get_intersectpoint(const Point& AP1, const Point& AP2,
 		const Point& BP1, const Point& BP2, Point* IP);
+	vector<double> get_left_lane();
+	vector<double> get_right_lane();
 };
 
 bool Lane_Detector::is_left_error() {
@@ -127,7 +130,12 @@ float Lane_Detector::get_left_slope() {
 float Lane_Detector::get_right_slope() {
 	return right_slope;
 }
-
+vector<double> Lane_Detector::get_left_lane(){
+	return left_lane;
+}
+vector<double> Lane_Detector::get_right_lane(){
+	return right_lane;
+}
 void Lane_Detector::init() {
 	string path = "output.avi";
 	struct tm* datetime;
@@ -152,7 +160,8 @@ void Lane_Detector::init() {
 	error_count_r = 0;
 	vanishing_point_x = 320;
 	vanishing_point_y = 235;
-	
+	left_lane = vector<double>(2);
+	right_lane = vector<double>(2);
 	
 	//outputVideo.open(s_t, VideoWriter::fourcc('X', 'V', 'I', 'D'), 10, Size(720, 120), true);
 	outputVideo.open(s_t, VideoWriter::fourcc('D', 'I', 'V', 'X'), 10, Size(720, 120), true);
@@ -174,8 +183,6 @@ void Lane_Detector::operate(Mat originImg) {
 	Mat roi_l = dilatedImg.clone();
 	Mat roi_r = dilatedImg.clone();
 	
-	BASE_ROI:
-	printf("base roi...\n");
 	for(int i = 0; i < 120; i++){
 		for(int j = 70; j < 140; j++){
 			roi_l.data[i * roi_l.step + j] = 0;
@@ -208,20 +215,18 @@ void Lane_Detector::operate(Mat originImg) {
 		// for(int j = 1; j <= 22; j+=2){
 		// 	line(imremapped, Point(7*(j), i*30 + 30), Point(7*(j+1), i*30 + 30), COLOR_RED, 1, CV_AA);
 		// }
-		max_arg_l[i] = argmax(histogram_l[i], 140);
+		max_arg_l[i] = argmax_r(histogram_l[i], 140);
 		max_arg_r[i] = argmax(histogram_r[i], 140);
 		
 		if(max_arg_l[i] != -1){
-			//circle(imremapped, Point(max_arg_l[i], i * 30 + 15), 3, Scalar(255, 255, 0), -1);
 			double d = abs(max_arg_l[i] - prev_slope_l * (i * 30 + 15) - prev_intercept_l)/sqrt(1+pow(prev_slope_l, 2));
-			printf("left point distance : %f\n", d);
+			//printf("left point distance : %f\n", d);
 			if(isinit || d < 25 || error_count_l < 5)
 				points_l.push_back(Point(i * 30 + 15, max_arg_l[i]));
 		}
 		if(max_arg_r[i] != -1){
-			//circle(imremapped, Point(max_arg_r[i]+70, i * 30 + 15), 3, Scalar(0, 255, 255), -1);
 			double d = abs(max_arg_r[i] - prev_slope_r * (i * 30 + 15) - prev_intercept_r)/sqrt(1+pow(prev_slope_r, 2));
-			printf("right point distance : %f\n", d);
+			//printf("right point distance : %f\n", d);
 			if(isinit || d < 25 || error_count_r < 5)
 				points_r.push_back(Point(i * 30 + 15, max_arg_r[i]));
 		}
@@ -229,14 +234,13 @@ void Lane_Detector::operate(Mat originImg) {
 	
 	
 	Mat forcurve;
-	//cvtColor(imremapped, imremapped, COLOR_GRAY2BGRA);
 	forcurve = imremapped.clone();
 	int degree_l = 1, degree_r = 1;
-	printf("prev left: %fx: \n",prev_slope_l);
-	printf("prev right: %fx: \n",prev_slope_r);
-	printf("left: ");
+	//printf("prev left: %fx: \n",prev_slope_l);
+	//printf("prev right: %fx: \n",prev_slope_r);
+	//printf("left: ");
 	poly_left = polyfit(points_l.size(), points_l, degree_l);
-	printf("right: ");
+	//printf("right: ");
 	poly_right = polyfit(points_r.size(), points_r, degree_r);
 	
 	if(isnan(poly_left[1])){
@@ -251,8 +255,8 @@ void Lane_Detector::operate(Mat originImg) {
 	else{
 		error_count_r = 0;
 	}
-	printf("error count left : %d\n", error_count_l);
-	printf("error count right : %d\n", error_count_r);
+	// printf("error count left : %d\n", error_count_l);
+	// printf("error count right : %d\n", error_count_r);
 	if(abs(poly_left[1]) < 0.04f) {
 		poly_left[1] = 0.f;
 		if(abs(poly_right[1]) > 0.04f && abs(poly_right[1]) < 0.1f){
@@ -260,12 +264,9 @@ void Lane_Detector::operate(Mat originImg) {
 		}
 	}
 	else if(abs(prev_slope_l - poly_left[1]) > 0.5){
-		// poly_left[1] = poly_right[1];
-		// poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
-		// printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
 		poly_left[1] = prev_slope_l;
 		poly_left[0] = prev_intercept_l;
-		printf("new left: %fx\n", poly_left[1]);
+		//printf("new left: %fx\n", poly_left[1]);
 	}
 	if(abs(poly_right[1]) < 0.04f) {
 		poly_right[1] = 0.f;
@@ -274,12 +275,9 @@ void Lane_Detector::operate(Mat originImg) {
 		}
 	}
 	else if(abs(prev_slope_r - poly_right[1]) > 0.5){
-		// poly_right[1] = poly_left[1];
-		// poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
-		// printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
 		poly_right[1] = prev_slope_r;
 		poly_right[0] = prev_intercept_r;
-		printf("new right: %fx\n", poly_right[1]);
+		//printf("new right: %fx\n", poly_right[1]);
 	}
 	
 	if(isnan(poly_left[1]) || isnan(poly_right[1]) ||  prev_slope_l * poly_left[1] < 0 || poly_left[1] * poly_right[1] < -0.1) {
@@ -292,26 +290,26 @@ void Lane_Detector::operate(Mat originImg) {
 		else if(isnan(poly_left[1]) || prev_slope_l * poly_left[1] < 0.0f) {
 			poly_left[1] = poly_right[1];
 			poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
-			printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
+			//printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
 		}
 		else if(isnan(poly_right[1]) || prev_slope_r * poly_right[1] < 0.f){
 			poly_right[1] = poly_left[1];
 			poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
-			printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+			//printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
 		}
 	}
 	double distance = (poly_right[0] - poly_left[0]) / sqrt(1 + pow(poly_left[1], 2));
-	printf("distance : %f\n", distance);
+	// printf("distance : %f\n", distance);
 	if (abs(distance) < 90) {
 		if((distance < 90 && distance > 0)) {
 			poly_left[1] = poly_right[1];
 			poly_left[0] = poly_right[0] - 100*sqrt(1+pow(poly_right[1],2));
-			printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
+			// printf("new left: %fx^1 + %fx^0\n", poly_left[1], poly_left[0]);
 		}
 		else if((distance < 0 && distance > -90)){
 			poly_right[1] = poly_left[1];
 			poly_right[0] = poly_left[0] + 100*sqrt(1+pow(poly_left[1],2));
-			printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
+			// printf("new right: %fx^1 + %fx^0\n", poly_right[1], poly_right[0]);
 		}
 	}
 	if (abs(poly_right[1]-poly_left[1]) > 0.1){
@@ -366,6 +364,10 @@ void Lane_Detector::operate(Mat originImg) {
 	}
 	cvtColor(result2, result2, CV_BGRA2BGR);
 	//outputVideo << result2;
+	left_lane[0] = poly_left[0];
+	left_lane[1] = poly_left[1];
+	right_lane[0] = poly_right[0];
+	right_lane[1] = poly_right[1];
 	if(waitKey(10)==0){
 		return;
 	}
@@ -426,12 +428,12 @@ vector<double> Lane_Detector::polyfit(int size, vector<Point> vec_p, int degree)
 		a[i] = a[i] / B[i][i];
 	}
 	for(int i = n-1; i >= 0; i--){
-		printf("%fx^%d", a[i], i);
+		// printf("%fx^%d", a[i], i);
 		if(i != 0){
-			printf(" + ");
+			// printf(" + ");
 		}
 		else{
-			printf("\n");
+			// printf("\n");
 		}
 	}
 	vector<double> result;
@@ -473,169 +475,21 @@ bool Lane_Detector::get_intersectpoint(const Point& AP1, const Point& AP2,
 	return true;
 }
 
-bool Lane_Detector::hough_left(Mat& img, Point* p1, Point* p2) {
-
-	vector<Vec2f> linesL;
-
-	int count = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-	int threshold = 40;
-
-	for (int i = 10; i > 0; i--) {
-		HoughLines(img, linesL, 1, CV_PI / 180, threshold, 0, 0, 0, CV_PI);
-		int clusterCount = 2;
-		Mat h_points = Mat(linesL.size(), 1, CV_32FC2);
-		Mat labels, centers;
-		
-		if (linesL.size() > 1) {
-			for (size_t i = 0; i < linesL.size(); i++) {
-				count++;
-				float rho = linesL[i][0];
-				float theta = linesL[i][1];
-				double a = cos(theta), b = sin(theta);
-				double x0 = a * rho, y0 = b * rho;
-				// cout << "x0, y0 : " << rho << ' ' << theta << endl;
-				h_points.at<Point2f>(i, 0) = Point2f(rho, (float)(theta * 100));
-			}
-			
-			// kmeans(h_points, clusterCount, labels,
-			// 	TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 10, 1.0),
-			// 	3, KMEANS_RANDOM_CENTERS, centers);
-
-			Point mypt1 = centers.at<Point2f>(0, 0);
-
-			float rho = mypt1.x;
-			float theta = (float)mypt1.y / 100;
-			double a = cos(theta), b = sin(theta);
-			double x0 = a * rho, y0 = b * rho;
-
-			// cout << "pt : " << mypt1.x << ' ' << mypt1.y << endl;
-
-			int _x1 = int(x0 + 1000 * (-b));
-			int _y1 = int(y0 + 1000 * (a));
-			int _x2 = int(x0 - 1000 * (-b));
-			int _y2 = int(y0 - 1000 * (a));
-
-			x1 += _x1;
-			y1 += _y1;
-
-			x2 += _x2;
-			y2 += _y2;
-
-			Point mypt2 = centers.at<Point2f>(1, 0);
-
-			rho = mypt2.x;
-			theta = (float)mypt2.y / 100;
-			a = cos(theta), b = sin(theta);
-			x0 = a * rho, y0 = b * rho;
-
-			// cout << "pt : " << mypt2.x << ' ' << mypt2.y << endl;
-
-			_x1 = int(x0 + 1000 * (-b));
-			_y1 = int(y0 + 1000 * (a));
-			_x2 = int(x0 - 1000 * (-b));
-			_y2 = int(y0 - 1000 * (a));
-
-			x1 += _x1;
-			y1 += _y1;
-
-			x2 += _x2;
-			y2 += _y2;
-
-			break;
-		};
-	}
-	if (count != 0) {
-		p1->x = x1 / 2; p1->y = y1 / 2;
-		p2->x = x2 / 2; p2->y = y2 / 2;
-
-		left_error_count = 0;
-		return false;
-	}
-	return true;
-}
-
-bool Lane_Detector::hough_right(Mat& img, Point* p1, Point* p2) {
-	vector<Vec2f> linesR;
-
-	int count = 0, x1 = 0, x2 = 0, y1 = 0, y2 = 0;
-	int threshold = 40;
-
-	for (int i = 10; i > 0; i--) {
-		HoughLines(img, linesR, 1, CV_PI / 180, threshold, 0, 0, CV_PI / 2, CV_PI);
-		int clusterCount = 2;
-		Mat h_points = Mat(linesR.size(), 1, CV_32FC2);
-		Mat labels, centers;
-		if (linesR.size() > 1) {
-			for (size_t i = 0; i < linesR.size(); i++) {
-				count++;
-				float rho = linesR[i][0];
-				float theta = linesR[i][1];
-				double a = cos(theta), b = sin(theta);
-				double x0 = a * rho, y0 = b * rho;
-				// cout << "x0, y0 : " << rho << ' ' << theta << endl;
-				h_points.at<Point2f>(i, 0) = Point2f(rho, (float)(theta * 100));
-			}
-			// kmeans(h_points, clusterCount, labels,
-			// 	TermCriteria(TermCriteria::COUNT + TermCriteria::EPS, 10, 1.0),
-			// 	3, KMEANS_RANDOM_CENTERS, centers);
-
-			Point mypt1 = centers.at<Point2f>(0, 0);
-
-			float rho = mypt1.x;
-			float theta = (float)mypt1.y / 100;
-			double a = cos(theta), b = sin(theta);
-			double x0 = a * rho, y0 = b * rho;
-
-			// cout << "pt : " << mypt1.x << ' ' << mypt1.y << endl;
-
-			int _x1 = int(x0 + 1000 * (-b));
-			int _y1 = int(y0 + 1000 * (a));
-			int _x2 = int(x0 - 1000 * (-b));
-			int _y2 = int(y0 - 1000 * (a));
-
-			x1 += _x1;
-			y1 += _y1;
-
-			x2 += _x2;
-			y2 += _y2;
-
-			Point mypt2 = centers.at<Point2f>(1, 0);
-
-			rho = mypt2.x;
-			theta = (float)mypt2.y / 100;
-			a = cos(theta), b = sin(theta);
-			x0 = a * rho, y0 = b * rho;
-
-			// cout << "pt : " << mypt2.x << ' ' << mypt2.y << endl;
-
-			_x1 = int(x0 + 1000 * (-b));
-			_y1 = int(y0 + 1000 * (a));
-			_x2 = int(x0 - 1000 * (-b));
-			_y2 = int(y0 - 1000 * (a));
-
-			x1 += _x1;
-			y1 += _y1;
-
-			x2 += _x2;
-			y2 += _y2;
-
-			break;
-		};
-	}
-	if (count != 0) {
-		p1->x = x1 / 2; p1->y = y1 / 2;
-		p2->x = x2 / 2; p2->y = y2 / 2;
-
-		right_error_count = 0;
-		return false;
-	}
-	return true;
-}
-
 int Lane_Detector::argmax(int* arr, int size) {
 	int max = 0;
 	int max_index = -1;
 	for(int i = 0; i < size; i++) {
+		if(arr[i] > max) {
+			max = arr[i];
+			max_index = i;
+		}
+	} 
+	return max_index;
+}
+int Lane_Detector::argmax_r(int* arr, int size) {
+	int max = 0;
+	int max_index = -1;
+	for(int i = size-1; i >= 0; i--) {
 		if(arr[i] > max) {
 			max = arr[i];
 			max_index = i;
