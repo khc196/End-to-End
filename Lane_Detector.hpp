@@ -221,13 +221,13 @@ void Lane_Detector::operate(Mat originImg) {
 		if(max_arg_l[i] != -1){
 			double d = abs(max_arg_l[i] - prev_slope_l * (i * 30 + 15) - prev_intercept_l)/sqrt(1+pow(prev_slope_l, 2));
 			//printf("left point distance : %f\n", d);
-			if(isinit || d < 25 || error_count_l < 5)
+			if(isinit || d < 25 || error_count_l < 2)
 				points_l.push_back(Point(i * 30 + 15, max_arg_l[i]));
 		}
 		if(max_arg_r[i] != -1){
 			double d = abs(max_arg_r[i] - prev_slope_r * (i * 30 + 15) - prev_intercept_r)/sqrt(1+pow(prev_slope_r, 2));
 			//printf("right point distance : %f\n", d);
-			if(isinit || d < 25 || error_count_r < 5)
+			if(isinit || d < 25 || error_count_r < 2)
 				points_r.push_back(Point(i * 30 + 15, max_arg_r[i]));
 		}
 	}	

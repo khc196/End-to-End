@@ -51,7 +51,7 @@ int main(int argc, char* argv)
             int steer;
             int position = (left_lane[0] + right_lane[0]) / 2; 
             int error = 70 - position;
-            steer = tan((left_lane[1] + right_lane[1])) / 3 * 30 + error / 5;
+            steer = tan((left_lane[1] + right_lane[1])) * 20 + error*2.5;
             printf("tan : %f\n", tan((left_lane[1] + right_lane[1])));
             if(steer > 100) {
                 steer = 100;
